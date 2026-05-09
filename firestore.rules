@@ -1,0 +1,107 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidService(data) {
+      return data.keys().hasAll(['id', 'name', 'price', 'duration', 'category'])
+        && data.id is string && data.id.size() <= 64
+        && data.name is string && data.name.size() <= 100
+        && data.price is number && data.price >= 0
+        && data.duration is number && data.duration > 0
+        && data.category in ['hair', 'beard', 'combo', 'vip'];
+    }
+
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['userId', 'serviceId', 'barberId', 'date', 'time', 'status', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.serviceId is string
+        && data.barberId is string
+        && data.date is string && data.date.size() <= 50
+        && data.time is string && data.time.size() <= 20
+        && data.status in ['pending', 'confirmed', 'cancelled', 'completed']
+        && data.createdAt == request.time;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['userId', 'userName', 'rating', 'comment', 'date'])
+        && data.userId == request.auth.uid
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() <= 1000;
+    }
+
+    // --- Collection Logic ---
+
+    // Services: Public Read, Admin Write
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if false; // Admin only - managed via console or backend
+    }
+
+    // Barbers: Public Read, Admin Write
+    match /barbers/{barberId} {
+      allow read: if true;
+      allow write: if false; // Admin only
+    }
+
+    // Appointments: Owner Read/Write
+    match /appointments/{appointmentId} {
+      allow read: if isSignedIn() && (isOwner(existing().userId) || isOwner(incoming().userId));
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() 
+        && isValidId(appointmentId)
+        && isValidAppointment(incoming());
+        
+      allow update: if isSignedIn() 
+        && isOwner(existing().userId)
+        && incoming().userId == existing().userId
+        && isValidAppointment(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'date', 'time']);
+        
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+    }
+
+    // Reviews: Public Read, Owner Write
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidReview(incoming()) && isValidId(reviewId);
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidReview(incoming());
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+    }
+
+    // Memberships: Owner Read, System/Admin Write
+    match /memberships/{membershipId} {
+      allow read: if isSignedIn() && isOwner(existing().userId);
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if false; // Managed by backend service usually
+    }
+  }
+}

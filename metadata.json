@@ -1,0 +1,6 @@
+{
+  "name": "The Grooming Lounge - Premium Barber Shop",
+  "description": "A luxury modern barber shop experience with seamless appointment booking, premium services, and master barbers.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["Appointments", "Ecommerce", "AI Consultation"]
+}
